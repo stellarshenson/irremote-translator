@@ -108,6 +108,7 @@ void setup()
   fsm.add_transition(&state_ircode_record, &state_ircode_sense, TRIGGER_IRCODE_CANCELED, NULL);  
 
   if(DEBUG_LEVEL == 2) { 
+    printIRCodesSerial();
     Serial.print(F("[INIT] System intiated with ")); 
     Serial.print(irCodesAvailable, DEC); 
     Serial.println(F(" recorded IR codes"));
@@ -388,4 +389,18 @@ int findIRCodeIndex(unsigned long findCodeValue) {
 
     //return index of the found code
     return _index;
+}
+
+/**
+ * prints recorded ircodes and their translations
+*/
+void printIRCodesSerial() {
+  //go through the table and print codes
+  for(int i=0; i<IRCODES_NUMBER; i++) {
+    unsigned long srcCodeValue = (unsigned long)(irCodes[i][IRCODES_SRC_CODE0]) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE1]<<8) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE2]<<16) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE3]<<24);
+    unsigned long tgtCodeValue = (unsigned long)(irCodes[i][IRCODES_TGT_CODE0]) | (unsigned long)(irCodes[i][IRCODES_TGT_CODE1]<<8) | (unsigned long)(irCodes[i][IRCODES_TGT_CODE2]<<16) | (unsigned long)(irCodes[i][IRCODES_TGT_CODE3]<<24);
+    Serial.print(srcCodeValue, HEX);
+    Serial.print(" -> ");
+    Serial.println(tgtCodeValue, HEX);
+  }
 }
