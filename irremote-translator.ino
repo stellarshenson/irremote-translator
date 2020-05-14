@@ -10,6 +10,9 @@
 #include <EEPROM.h>
 #include <Fsm.h>
 #include <EnableInterrupt.h>
+#include <Thread.h>
+#include <ThreadRunOnce.h>
+#include <ThreadController.h>
 
 #define SEND_PIN 3
 #define RECV_PIN 2
@@ -25,20 +28,18 @@
 
 #define DEBUG_LEVEL 2 //0 - debug off, 1 - essential messages, 2 - full diagnostics
 
+//saved ir codes - we only need the code from SRC, not length or type
 #define IRCODES_NUMBER       16 //number of codes stored in memory
-#define IRCODES_SRC_CODETYPE 0
-#define IRCODES_SRC_CODELEN  1
-#define IRCODES_SRC_CODE0    2
-#define IRCODES_SRC_CODE1    3
-#define IRCODES_SRC_CODE2    4
-#define IRCODES_SRC_CODE3    5
-#define IRCODES_TGT_CODETYPE 6
-#define IRCODES_TGT_CODELEN  7
-#define IRCODES_TGT_CODE0    8
-#define IRCODES_TGT_CODE1    9
-#define IRCODES_TGT_CODE2    10
-#define IRCODES_TGT_CODE3    11
-
+#define IRCODES_SRC_CODE0    0
+#define IRCODES_SRC_CODE1    1
+#define IRCODES_SRC_CODE2    2
+#define IRCODES_SRC_CODE3    3
+#define IRCODES_TGT_CODETYPE 4
+#define IRCODES_TGT_CODELEN  5
+#define IRCODES_TGT_CODE0    6
+#define IRCODES_TGT_CODE1    7
+#define IRCODES_TGT_CODE2    8
+#define IRCODES_TGT_CODE3    9
 
 
 //IR receiver setup
@@ -50,7 +51,7 @@ decode_results results;
 void sendCode(uint8_t repeat, uint8_t codeType, uint8_t codeLen, unsigned long codeValue);
 void storeCode(decode_results *results, int8_t &codeType, uint8_t &codeLen, unsigned long &codeValue);
 
-static uint8_t irCodes[IRCODES_NUMBER][12] = {0}; //static initialisation to 0 of all elements
+static uint8_t irCodes[IRCODES_NUMBER][10] = {0}; //static initialisation to 0 of all elements
 
 uint8_t codeType = 255; // The type of code, 255 is unsigned equivalent of -1
 uint8_t codeLen = 0; // The length of the code
@@ -77,6 +78,11 @@ State state_ircode_sense(on_ircode_sense_enter, on_ircode_sense_loop, on_ircode_
 State state_ircode_record(on_ircode_record_enter, on_ircode_record_loop, on_ircode_record_exit);
 Fsm   fsm(&state_ircode_sense);
 
+//threads
+ThreadController controll = ThreadController();
+ThreadRunOnce runOnceThread = ThreadRunOnce();
+
+
 void setup()
 {
   Serial.begin(9600);
@@ -94,7 +100,7 @@ void setup()
   else getIRCodesFromEEPROM();
 
   //find out if we have any codes recorded - and count them
-  for(int i=0; i<IRCODES_NUMBER; i++) irCodesAvailable = (irCodesAvailable > 0 || irCodes[i][IRCODES_SRC_CODELEN] > 0 ? ++irCodesAvailable : irCodesAvailable);
+  for(int i=0; i<IRCODES_NUMBER; i++) irCodesAvailable = (irCodesAvailable > 0 || irCodes[i][IRCODES_SRC_CODE0] > 0 ? ++irCodesAvailable : irCodesAvailable);
 
   //initialise state machine
   fsm.add_transition(&state_ircode_sense, &state_ircode_record, TRIGGER_IRCODE_RECORD, NULL);
@@ -128,6 +134,10 @@ void on_ircode_sense_enter() {
   //interrupt initialisation
   ircode_record_detected = 0;
   enableInterrupt(IRCODE_RECORD_PIN, on_ircode_record_irq, CHANGE);
+
+  // enable receiver
+  irrecv.enableIRIn(); 
+
 }
 
 /**
@@ -135,9 +145,8 @@ void on_ircode_sense_enter() {
 * ircode button -> goes to ircode recording
 */
 void on_ircode_sense_loop() {
-  //blink status 2hz to indicate listening for audio
-  blink(STATUS_LED_PIN, 1, 1000);
-
+  int foundCodeIndex = -1;
+  
   // button to enable recording ircode
   // driven by interrupts now on IRCODE_RECORD_PIN
   if (ircode_record_detected == 1) {
@@ -145,6 +154,29 @@ void on_ircode_sense_loop() {
     blink(STATUS_LED_PIN, 3, 300);
     fsm.trigger(TRIGGER_IRCODE_RECORD);
   } 
+
+  //check the IR code and send response code
+  if( irrecv.decode(&results) ) {
+    //read the code and find the translation code
+    storeCode(&results, codeType, codeLen, codeValue);   
+
+    foundCodeIndex = findIRCodeIndex(codeValue);
+    if(foundCodeIndex > 0) {
+      codeValue = (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE0]) |
+                  (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE1]<<8) | 
+                  (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE2]<<16) | 
+                  (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE3]<<24);
+      codeType = irCodes[foundCodeIndex][IRCODES_TGT_CODETYPE];
+      codeLen = irCodes[foundCodeIndex][IRCODES_TGT_CODELEN];
+
+      //send code and resume operation
+      sendCode(0, codeType, codeLen, codeValue); //send recorded or saved IR code without repeat
+      irrecv.resume(); //resume for the next code  
+    }
+
+    
+    
+  }
 }
 
 /**
@@ -305,12 +337,13 @@ void on_ircode_record_irq() {
 * blinks pin with a led #cycles number of times, each within the duration
 */
 static void  blink( const byte pin, const byte cycles, const unsigned int duration){
-  uint8_t initialState = digitalRead(pin);
+  static uint8_t initialState = digitalRead(pin);
   for(unsigned short i=0; i<cycles * 2; i++){
     digitalWrite(pin, ~(i+initialState) & 1);
     delay(duration / 2);
   }
 }
+
 
 /**
  * this function saves the ircodes to eeprom
@@ -330,4 +363,29 @@ void getIRCodesFromEEPROM() {
     int c = sizeof(irCodes[0])/sizeof(irCodes[0][0]); //number of columns
     uint8_t eepromAddr = 1; //start with 1st eeprom cell, number 0 is reserved for status
     for(int i=0; i<IRCODES_NUMBER; i++) for(int j=0; j<c; j++) irCodes[i][j] = EEPROM.read(eepromAddr++);
+}
+
+/*
+ * finds index of the given codeValue in the ircodes table
+ * @return index when found, -1 otherwise
+*/
+int findIRCodeIndex(unsigned long findCodeValue) {
+    static int _index = -1;
+    static unsigned long _findCodeValue = 0;
+
+    //return cached result
+    if(findCodeValue == _findCodeValue && _index > 0) return _index;
+    else _findCodeValue = findCodeValue;
+  
+    //find the tgt code in the saved codes table
+    for(int i=0; i<IRCODES_NUMBER; i++) {
+      unsigned long srcCodeValue = (unsigned long)(irCodes[i][IRCODES_SRC_CODE0]) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE1]<<8) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE2]<<16) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE3]<<24);
+      if( findCodeValue == srcCodeValue ) {
+        _index = i;
+        break;  
+      } 
+    }
+
+    //return index of the found code
+    return _index;
 }
