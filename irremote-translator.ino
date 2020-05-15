@@ -38,7 +38,7 @@
 #define DEBUG_LEVEL 2 //0 - debug off, 1 - essential messages, 2 - full diagnostics
 
 //saved ir codes - we only need the code from SRC, not length or type
-#define IRCODES_NUMBER       16 //number of codes stored in memory
+#define IRCODES_NUMBER       32 //number of codes stored in memory
 #define IRCODES_SRC_CODE0    0
 #define IRCODES_SRC_CODE1    1
 #define IRCODES_SRC_CODE2    2
