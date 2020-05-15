@@ -15,11 +15,18 @@
 #include <ThreadRunOnce.h>
 #include <ThreadController.h>
 
+
+/*****************************************************************************************
+  ___ ___ _  _ ___ 
+ | _ \_ _| \| / __|
+ |  _/| || .` \__ \
+ |_| |___|_|\_|___/
+                   
+*****************************************************************************************/
 #define SEND_PIN 3
 #define RECV_PIN 2
 #define BUTTON_RECORD_PIN 12 //turns recording on, pullup and button connects to gnd
 #define BUTTON_RESET_PIN 11 //resets ir codes, pullup and button connects to gnd
-
 #define LED_STATUS_PIN 4
 #define LED_STORED_PIN 5
 
