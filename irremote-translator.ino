@@ -17,11 +17,11 @@
 
 #define SEND_PIN 3
 #define RECV_PIN 2
-#define IRCODE_RECORD_PIN 12 //turns recording on, pullup and button connects to gnd
-#define IRCODE_RESET_PIN 11 //resets ir codes, pullup and button connects to gnd
+#define BUTTON_RECORD_PIN 12 //turns recording on, pullup and button connects to gnd
+#define BUTTON_RESET_PIN 11 //resets ir codes, pullup and button connects to gnd
 
 #define LED_STATUS_PIN 4
-#define LED_STORED_PIN 3
+#define LED_STORED_PIN 5
 
 
 #define TRIGGER_IRCODE_RECORD 1
@@ -98,8 +98,8 @@ ThreadRunOnce runOnceThread = ThreadRunOnce();
 void setup() {
     Serial.begin(9600);
 
-    pinMode(IRCODE_RECORD_PIN, INPUT_PULLUP);
-    pinMode(IRCODE_RESET_PIN, INPUT_PULLUP);
+    pinMode(BUTTON_RECORD_PIN, INPUT_PULLUP);
+    pinMode(BUTTON_RESET_PIN, INPUT_PULLUP);
     pinMode(LED_STATUS_PIN, OUTPUT);
 
     //load saved codes
@@ -165,8 +165,8 @@ void on_ircode_sense_enter() {
     //interrupt initialisation
     ircode_record_detected = 0;
     ircode_reset_detected = 0;
-    enableInterrupt(IRCODE_RECORD_PIN, on_ircode_record_irq, RISING);
-    enableInterrupt(IRCODE_RESET_PIN, on_ircode_reset_irq, RISING);
+    enableInterrupt(BUTTON_RECORD_PIN, on_ircode_record_irq, RISING);
+    enableInterrupt(BUTTON_RESET_PIN, on_ircode_reset_irq, RISING);
 
     // enable receiver
     irrecv.enableIRIn();
@@ -245,8 +245,8 @@ void on_ircode_sense_loop() {
 */
 void on_ircode_sense_exit() {
     if (DEBUG_LEVEL == 2) Serial.println(F("[IRCODE SENSE] Exit. Disabling ir signal detection"));
-    disableInterrupt(IRCODE_RECORD_PIN);
-    disableInterrupt(IRCODE_RESET_PIN);
+    disableInterrupt(BUTTON_RECORD_PIN);
+    disableInterrupt(BUTTON_RESET_PIN);
 }
 
 // IRCODE RECORD STATE
@@ -267,8 +267,8 @@ void on_ircode_record_enter() {
     //and the reset button will reset the codes
     ircode_record_detected = 0;
     ircode_reset_detected = 0;
-    enableInterrupt(IRCODE_RECORD_PIN, on_ircode_record_irq, RISING);
-    enableInterrupt(IRCODE_RESET_PIN, on_ircode_reset_irq, RISING);
+    enableInterrupt(BUTTON_RECORD_PIN, on_ircode_record_irq, RISING);
+    enableInterrupt(BUTTON_RESET_PIN, on_ircode_reset_irq, RISING);
 
     if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD] Start.  Enabling IR receiver"));
 }
@@ -289,8 +289,8 @@ void on_ircode_record_loop() {
         fsm.trigger(TRIGGER_IRCODE_CANCELED);
     }
 
-    // button to perform reset
-    if (ircode_reset_detected == 1) {
+    // button to perform reset but only before first code was recorded
+    if (ircode_reset_detected == 1 && irCodeRecordingStatus == 0) {
         delay(250); //avoid bounce
         if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD] reset detected"));
         blink(LED_STATUS_PIN, 3, 300);
@@ -359,7 +359,8 @@ void on_ircode_record_loop() {
         saveIRCodesToEEPROM();
         printIRCodesSerial();
 
-        //set stored LED on
+        //blink and turn STORED LED on
+        blink(LED_STORED_PIN, 3, 300);
         digitalWrite(LED_STORED_PIN, HIGH);
 
         //reset ir receiver and trigger transition
@@ -373,8 +374,8 @@ void on_ircode_record_loop() {
 */
 void on_ircode_record_exit() {
     if (DEBUG_LEVEL == 2) Serial.println(F("[IRCODE RECORD] Exit. Disabling receiver"));
-    disableInterrupt(IRCODE_RECORD_PIN);
-    disableInterrupt(IRCODE_RESET_PIN);
+    disableInterrupt(BUTTON_RECORD_PIN);
+    disableInterrupt(BUTTON_RESET_PIN);
 }
 
 /*  ==================================================================================================================
