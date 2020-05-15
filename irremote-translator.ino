@@ -17,10 +17,12 @@
 
 #define SEND_PIN 3
 #define RECV_PIN 2
-#define IRCODE_RECORD_PIN 12
-#define STATUS_LED_PIN 4
-#define IRCODE_STORED_LED_PIN 10
-#define IRCODE_RECORD_LED_PIN 9
+#define IRCODE_RECORD_PIN 12 //turns recording on, pullup and button connects to gnd
+#define IRCODE_RESET_PIN 11 //resets ir codes, pullup and button connects to gnd
+
+#define LED_STATUS_PIN 4
+#define LED_STORED_PIN 3
+
 
 #define TRIGGER_IRCODE_RECORD 1
 #define TRIGGER_IRCODE_RECORDED 2
@@ -56,11 +58,13 @@ static uint8_t irCodes[IRCODES_NUMBER][10] = {0}; //static initialisation to 0 o
 
 uint8_t codeType = 255; // The type of code, 255 is unsigned equivalent of -1
 uint8_t codeLen = 0; // The length of the code
-uint32_t codeValue = 0; // The code value if not raw
+unsigned long codeValue = 0; // The code value if not raw
+int codeIndex = -1; //index of the code in the translation table, used for recording
 
 uint8_t toggle = 0; // The RC5/6 toggle state
 uint16_t rawCodes[RAWBUF]; // The durations if raw
-uint8_t irCodesAvailable = 0; //if ircodes were recorded
+uint8_t irCodesAvailable = 0; //how many ircodes were recorded and saved, initiated during setup
+uint8_t irCodeRecordingStatus = 0; //code recording status used during recording session. 0 - not recorded, 1 - src recorded, 2 - tgt recorded
 
 //interrupt driver
 void on_ircode_record_irq();
@@ -85,19 +89,18 @@ ThreadController controll = ThreadController();
 ThreadRunOnce runOnceThread = ThreadRunOnce();
 
 /***********************************************************************************************
-  ___      _             
- / __| ___| |_ _  _ _ __ 
- \__ \/ -_)  _| || | '_ \
- |___/\___|\__|\_,_| .__/
-                   |_|   
+    ___      _
+    / __| ___| |_ _  _ _ __
+    \__ \/ -_)  _| || | '_ \
+    |___/\___|\__|\_,_| .__/
+                   |_|
 ***********************************************************************************************/
 void setup() {
     Serial.begin(9600);
 
     pinMode(IRCODE_RECORD_PIN, INPUT_PULLUP);
-    pinMode(STATUS_LED_PIN, OUTPUT);
-    pinMode(IRCODE_STORED_LED_PIN, OUTPUT);
-    pinMode(IRCODE_RECORD_LED_PIN, OUTPUT);
+    pinMode(IRCODE_RESET_PIN, INPUT_PULLUP);
+    pinMode(LED_STATUS_PIN, OUTPUT);
 
     //load saved codes
     uint8_t initStatus = EEPROM.read(0); //if initStatus=1 initialised, initStatus=0 uninitialised
@@ -114,7 +117,7 @@ void setup() {
     }
 
     //find out if we have any codes recorded - and count them
-    for (int i = 0; i < IRCODES_NUMBER; i++) irCodesAvailable = (irCodesAvailable > 0 || irCodes[i][IRCODES_SRC_CODE0] != 0 ? ++irCodesAvailable : irCodesAvailable);
+    for (int i = 0; i < IRCODES_NUMBER; i++) irCodesAvailable = (irCodes[i][IRCODES_SRC_CODE0] != 0 ? ++irCodesAvailable : irCodesAvailable);
 
     //initialise state machine
     fsm.add_transition(&state_ircode_sense, &state_ircode_record, TRIGGER_IRCODE_RECORD, NULL);
@@ -128,26 +131,29 @@ void setup() {
         Serial.print(F(" recorded IR codes, system initiation status: "));
         Serial.println(initStatus, DEC);
     }
+
+    //status LEDs
+    if(irCodesAvailable > 0) digitalWrite(LED_STORED_PIN, HIGH);
 }
 
 /********************************************************************************************************************
-  _                  
- | |   ___  ___ _ __ 
- | |__/ _ \/ _ \ '_ \
- |____\___/\___/ .__/
-               |_|   
-/*********************************************************************************************************************/
+    _
+    | |   ___  ___ _ __
+    | |__/ _ \/ _ \ '_ \
+    |____\___/\___/ .__/
+               |_|
+    /*********************************************************************************************************************/
 void loop() {
     fsm.run_machine(); //run state loops
 }
 
-/*==================================================================================================================== 
-  ___ _        _         __  __         _    _          
- / __| |_ __ _| |_ ___  |  \/  |__ _ __| |_ (_)_ _  ___ 
- \__ \  _/ _` |  _/ -_) | |\/| / _` / _| ' \| | ' \/ -_)
- |___/\__\__,_|\__\___| |_|  |_\__,_\__|_||_|_|_||_\___|
-                                                        
-====================================================================================================================*/
+/*  ====================================================================================================================
+    ___ _        _         __  __         _    _
+    / __| |_ __ _| |_ ___  |  \/  |__ _ __| |_ (_)_ _  ___
+    \__ \  _/ _` |  _/ -_) | |\/| / _` / _| ' \| | ' \/ -_)
+    |___/\__\__,_|\__\___| |_|  |_\__,_\__|_||_|_|_||_\___|
+
+    ====================================================================================================================*/
 // STATE_IRCODE_SENSE
 
 /**
@@ -158,12 +164,12 @@ void on_ircode_sense_enter() {
 
     //interrupt initialisation
     ircode_record_detected = 0;
-    enableInterrupt(IRCODE_RECORD_PIN, on_ircode_record_irq, CHANGE);
+    ircode_reset_detected = 0;
+    enableInterrupt(IRCODE_RECORD_PIN, on_ircode_record_irq, RISING);
+    enableInterrupt(IRCODE_RESET_PIN, on_ircode_reset_irq, RISING);
 
     // enable receiver
     irrecv.enableIRIn();
-
-    // reboot();
 }
 
 /**
@@ -171,34 +177,66 @@ void on_ircode_sense_enter() {
     ircode button -> goes to ircode recording
 */
 void on_ircode_sense_loop() {
-    int foundCodeIndex = -1;
+    int _foundIRCodeIndex = -1;
 
     // button to enable recording ircode
-    // driven by interrupts now on IRCODE_RECORD_PIN
     if (ircode_record_detected == 1) {
+        delay(250); //avoid bounce
         if (DEBUG_LEVEL) Serial.println(F("[IRCODE SENSE] IRCode recording detected"));
-        blink(STATUS_LED_PIN, 3, 300);
         fsm.trigger(TRIGGER_IRCODE_RECORD);
+        ircode_record_detected = 0;
     }
+
+    // button to perform reset
+    if (ircode_reset_detected == 1) {
+        if (DEBUG_LEVEL) Serial.println(F("[IRCODE SENSE] reset detected"));
+        delay(1250); //avoid bounce
+        blink(LED_STATUS_PIN, 3, 300);
+        resetIRCodes();
+        ircode_reset_detected = 0;
+    }
+
 
     //check the IR code and send response code
     if ( irrecv.decode(&results) ) {
         //read the code and find the translation code
+        codeType, codeLen, codeValue = 0;
         storeCode(&results, codeType, codeLen, codeValue);
+        Serial.print(F("[IRCODE SENSE] IR Signal detected with value: "));
+        if (results.value == REPEAT) Serial.println(F("NEC REPEAT"));
+        else Serial.println(codeValue, HEX);
 
-        foundCodeIndex = findIRCodeIndex(codeValue);
-        if (foundCodeIndex > 0) {
-            codeValue = (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE0]) |
-                        (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE1] << 8) |
-                        (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE2] << 16) |
-                        (unsigned long)(irCodes[foundCodeIndex][IRCODES_TGT_CODE3] << 24);
-            codeType = irCodes[foundCodeIndex][IRCODES_TGT_CODETYPE];
-            codeLen = irCodes[foundCodeIndex][IRCODES_TGT_CODELEN];
+        //if repeat, ignore translation, just send repeat
+        if (results.value == REPEAT) {
+        	Serial.println(F("[IRCODE SENSE] Sending NEC REPEAT IR Code"));
+            sendCode(1, codeType, codeLen, codeValue); //send NEC repeat
+        } 
+        //if no repeat, use translation table to send the right code
+        else {
+            _foundIRCodeIndex = findIRCodeIndex(codeValue);
+            if (_foundIRCodeIndex != -1) {
+                codeValue = ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE0]) |
+                            ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE1] << 8) |
+                            ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE2] << 16) |
+                            ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE3] << 24);
+                codeType = irCodes[_foundIRCodeIndex][IRCODES_TGT_CODETYPE];
+                codeLen = irCodes[_foundIRCodeIndex][IRCODES_TGT_CODELEN];
+                Serial.print(F("[IRCODE SENSE] IR code translation found with index: "));
+                Serial.println(_foundIRCodeIndex, DEC);
+                Serial.print(F("[IRCODE SENSE] sending translated IR code: "));
+                Serial.println(codeValue, HEX);
 
-            //send code and resume operation
-            sendCode(0, codeType, codeLen, codeValue); //send recorded or saved IR code without repeat
-            irrecv.resume(); //resume for the next code
+                //send code and resume operation
+                sendCode(0, codeType, codeLen, codeValue); //send recorded or saved IR code without repeat
+            } else {
+                Serial.println(F("[IRCODE SENSE][ERROR] IR code translation not found"));
+                blink(LED_STATUS_PIN, 3, 250);
+            }
         }
+
+        //resume listening and reset buffer
+        irrecv.resume();
+        irrecv.enableIRIn();
     }
 }
 
@@ -208,6 +246,7 @@ void on_ircode_sense_loop() {
 void on_ircode_sense_exit() {
     if (DEBUG_LEVEL == 2) Serial.println(F("[IRCODE SENSE] Exit. Disabling ir signal detection"));
     disableInterrupt(IRCODE_RECORD_PIN);
+    disableInterrupt(IRCODE_RESET_PIN);
 }
 
 // IRCODE RECORD STATE
@@ -222,9 +261,15 @@ void on_ircode_record_enter() {
 
     //reset stored codes to allow saving new ones
     codeType = 255; // The type of code, 255 is unsigned equivalent of -1
+    irCodeRecordingStatus = 0;
 
-    digitalWrite(IRCODE_STORED_LED_PIN, LOW);
-    digitalWrite(IRCODE_RECORD_LED_PIN, HIGH);
+    //enable button interrupts. record button will now cancel the recording
+    //and the reset button will reset the codes
+    ircode_record_detected = 0;
+    ircode_reset_detected = 0;
+    enableInterrupt(IRCODE_RECORD_PIN, on_ircode_record_irq, RISING);
+    enableInterrupt(IRCODE_RESET_PIN, on_ircode_reset_irq, RISING);
+
     if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD] Start.  Enabling IR receiver"));
 }
 
@@ -232,23 +277,94 @@ void on_ircode_record_enter() {
     waits until IR remote sends the IR code
 */
 void on_ircode_record_loop() {
+	//signal recording status with the status LED
+	if(irCodeRecordingStatus == 0) blink(LED_STATUS_PIN, 1, 250);
+	if(irCodeRecordingStatus == 1) blink(LED_STATUS_PIN, 1, 800);
+	
+    // button to cancel ircode recording
+    if (ircode_record_detected == 1) {
+        delay(250); //avoid bounce
+        if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD] IRCode recording canceled"));
+        ircode_record_detected = 0;
+        fsm.trigger(TRIGGER_IRCODE_CANCELED);
+    }
 
-    //blink pattern for recording: twice for the first code, once for the second code
-    //if(startAudioCodeType == 255 && stopAudioCodeType == 255) { blink(IRCODE_RECORD_LED_PIN, 2, 500); delay(500);  }
-    //if(startAudioCodeType != 255 && stopAudioCodeType == 255) { blink(IRCODE_RECORD_LED_PIN, 1, 500); delay(500);  }
+    // button to perform reset
+    if (ircode_reset_detected == 1) {
+        delay(250); //avoid bounce
+        if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD] reset detected"));
+        blink(LED_STATUS_PIN, 3, 300);
+        resetIRCodes();
+        ircode_reset_detected = 0;
+    }
 
-    //read and decode the ircode, ircode was received with the interrupts
-    if (irrecv.decode(&results)) {
-        //record start audio code
-        if ( codeType == 255 ) {
-            if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD][1/2] - SIGNAL ircode detected"));
-            blink(STATUS_LED_PIN, 3, 300);
-            storeCode(&results, codeType, codeLen, codeValue);
-            irrecv.resume(); //resume recording for the stop code
 
-            //trigger transition
-            fsm.trigger(TRIGGER_IRCODE_RECORDED);  //trigger transition only after audio stop code was recorded
+    //read and decode the src code
+    if (irrecv.decode(&results) && irCodeRecordingStatus == 0) {
+        if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD][1/2] - SRC ircode captured"));
+        storeCode(&results, codeType, codeLen, codeValue);
+        irCodeRecordingStatus++;
+
+        //check if code exists already
+        codeIndex = findIRCodeIndex(codeValue);
+        if (codeIndex != -1){
+        	if (DEBUG_LEVEL) {
+        		Serial.print(F("[IRCODE RECORD] existing code found with index ["));
+        		Serial.print(codeIndex, DEC);
+        		Serial.println(F("], overwriting code mapping"));
+    		}
+        } 
+
+        //check if need to find next free slot
+        if (codeIndex == -1){
+        	codeIndex = findFreeIRCodeIndex();
+        	if (DEBUG_LEVEL == 2 && codeIndex != -1) { Serial.print(F("[IRCODE RECORD] next available recording slot found [")); Serial.print(codeIndex, DEC); Serial.println(F("]")); }
+        } 
+
+        //check if index available
+        if (codeIndex == -1) {
+        	Serial.println(F("[IRCODE RECORD] no free slots found, exiting"));
+
+			//blink stored LED
+			blink(LED_STORED_PIN, 5, 400);
+        	        	
+            fsm.trigger(TRIGGER_IRCODE_RECORDED);
+            return;
         }
+
+        //store src code in the ircodes table
+        irCodes[codeIndex][IRCODES_SRC_CODE0] = codeValue;
+        irCodes[codeIndex][IRCODES_SRC_CODE1] = codeValue >> 8;
+        irCodes[codeIndex][IRCODES_SRC_CODE2] = codeValue >> 16;
+        irCodes[codeIndex][IRCODES_SRC_CODE3] = codeValue >> 24;
+
+        irrecv.resume(); //resume recording for the stop code
+    }
+
+    //read and decode the tgt code. slot must have been activated by now
+    if (irrecv.decode(&results) && irCodeRecordingStatus == 1) {
+        if (DEBUG_LEVEL) Serial.println(F("[IRCODE RECORD][2/2] - TGT ircode captured"));
+        storeCode(&results, codeType, codeLen, codeValue);
+        irCodeRecordingStatus++;
+
+        //put target codes in the ircode rable
+        irCodes[codeIndex][IRCODES_TGT_CODE0] = codeValue;
+        irCodes[codeIndex][IRCODES_TGT_CODE1] = codeValue >> 8;
+        irCodes[codeIndex][IRCODES_TGT_CODE2] = codeValue >> 16;
+        irCodes[codeIndex][IRCODES_TGT_CODE3] = codeValue >> 24;
+        irCodes[codeIndex][IRCODES_TGT_CODELEN] = codeLen;
+        irCodes[codeIndex][IRCODES_TGT_CODETYPE] = codeType;
+
+        //save results to EEPROM and show codes
+        saveIRCodesToEEPROM();
+        printIRCodesSerial();
+
+        //set stored LED on
+        digitalWrite(LED_STORED_PIN, HIGH);
+
+        //reset ir receiver and trigger transition
+        irrecv.resume(); //resume recording for the stop code
+        fsm.trigger(TRIGGER_IRCODE_RECORDED);  //trigger transition only after target code was captured
     }
 }
 
@@ -257,17 +373,17 @@ void on_ircode_record_loop() {
 */
 void on_ircode_record_exit() {
     if (DEBUG_LEVEL == 2) Serial.println(F("[IRCODE RECORD] Exit. Disabling receiver"));
-    digitalWrite(IRCODE_RECORD_LED_PIN, LOW);
-    digitalWrite(IRCODE_STORED_LED_PIN, HIGH);
+    disableInterrupt(IRCODE_RECORD_PIN);
+    disableInterrupt(IRCODE_RESET_PIN);
 }
 
-/*==================================================================================================================	
-  _   _ _   _ _ _ _   _        
- | | | | |_(_) (_) |_(_)___ ___
- | |_| |  _| | | |  _| / -_|_-<
-  \___/ \__|_|_|_|\__|_\___/__/
+/*  ==================================================================================================================
+    _   _ _   _ _ _ _   _
+    | | | | |_(_) (_) |_(_)___ ___
+    | |_| |  _| | | |  _| / -_|_-<
+    \___/ \__|_|_|_|\__|_\___/__/
 
-====================================================================================================================*/
+    ====================================================================================================================*/
 
 /**
     Stores the code for later playback
@@ -357,6 +473,8 @@ void sendCode(uint8_t repeat, uint8_t codeType, uint8_t codeLen, unsigned long c
 
 /**
     interrupt handler for ircode record button
+    pin has pullup enabled and the button shorts the pin to GND
+    interrupt must be enabled on the raising edge
 */
 void on_ircode_record_irq() {
     ircode_record_detected = 1;
@@ -364,19 +482,32 @@ void on_ircode_record_irq() {
 
 /**
     interrupt handler for ircode reset button
+	pin has pullup enabled and the button shorts the pin to GND
+    interrupt must be enabled on the raising edge
 */
-void on_ircode_reset_irq(){
-	ircode_reset_detected = 1;
+void on_ircode_reset_irq() {
+    ircode_reset_detected = 1;
 }
+
 
 
 /**
     blinks pin with a led #cycles number of times, each within the duration
 */
-static void  blink( const byte pin, const byte cycles, const unsigned int duration) {
-    static uint8_t initialState = digitalRead(pin);
+void  blink( const byte pin, const byte cycles, const unsigned int duration) {
+	blink(pin, cycles, duration, -1);
+}
+
+/**
+    blinks pin with a led #cycles number of times, each within the duration
+*/
+void  blink( const byte pin, const byte cycles, const unsigned int duration, const byte initialState) {
+    byte _initialState;
+    if(initialState != -1) _initialState = digitalRead(pin);
+    else _initialState = initialState;
+    
     for (unsigned short i = 0; i < cycles * 2; i++) {
-        digitalWrite(pin, ~(i + initialState) & 1);
+        digitalWrite(pin, ~(i + _initialState) & 1);
         delay(duration / 2);
     }
 }
@@ -402,6 +533,22 @@ void getIRCodesFromEEPROM() {
     for (int i = 0; i < IRCODES_NUMBER; i++) for (int j = 0; j < c; j++) irCodes[i][j] = EEPROM.read(eepromAddr++);
 }
 
+
+/**
+    reset all codes and write them to eeprom
+*/
+void resetIRCodes() {
+    int c = sizeof(irCodes[0]) / sizeof(irCodes[0][0]); //number of columns
+    Serial.println("[RESET] resetting all IR codes and writing them to EEPROM");
+    for (int i = 0; i < IRCODES_NUMBER; i++) for (int j = 0; j < c; j++) irCodes[i][j] = 0;
+    saveIRCodesToEEPROM();
+    printIRCodesSerial();
+
+	//turn ready led off
+    digitalWrite(LED_STORED_PIN, LOW);
+}
+
+
 /*
     finds index of the given codeValue in the ircodes table
     @return index when found, -1 otherwise
@@ -414,9 +561,13 @@ int findIRCodeIndex(unsigned long findCodeValue) {
     if (findCodeValue == _findCodeValue && _index > 0) return _index;
     else _findCodeValue = findCodeValue;
 
+    //reinitialise values
+    _index = -1;
+    _findCodeValue = 0;
+
     //find the tgt code in the saved codes table
     for (int i = 0; i < IRCODES_NUMBER; i++) {
-        unsigned long srcCodeValue = (unsigned long)(irCodes[i][IRCODES_SRC_CODE0]) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE1] << 8) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE2] << 16) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE3] << 24);
+        unsigned long srcCodeValue = ((unsigned long)irCodes[i][IRCODES_SRC_CODE0]) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE1] << 8) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE2] << 16) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE3] << 24);
         if ( findCodeValue == srcCodeValue ) {
             _index = i;
             break;
@@ -436,7 +587,7 @@ int findFreeIRCodeIndex() {
 
     //find first code with value 0
     for (int i = 0; i < IRCODES_NUMBER; i++) {
-        unsigned long srcCodeValue = (unsigned long)(irCodes[i][IRCODES_SRC_CODE0]) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE1] << 8) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE2] << 16) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE3] << 24);
+        unsigned long srcCodeValue = ((unsigned long)irCodes[i][IRCODES_SRC_CODE0]) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE1] << 8) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE2] << 16) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE3] << 24);
         if ( srcCodeValue == 0 ) {
             _index = i;
             break;
@@ -453,8 +604,8 @@ int findFreeIRCodeIndex() {
 void printIRCodesSerial() {
     //go through the table and print codes
     for (int i = 0; i < IRCODES_NUMBER; i++) {
-        unsigned long srcCodeValue = (unsigned long)(irCodes[i][IRCODES_SRC_CODE0]) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE1] << 8) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE2] << 16) | (unsigned long)(irCodes[i][IRCODES_SRC_CODE3] << 24);
-        unsigned long tgtCodeValue = (unsigned long)(irCodes[i][IRCODES_TGT_CODE0]) | (unsigned long)(irCodes[i][IRCODES_TGT_CODE1] << 8) | (unsigned long)(irCodes[i][IRCODES_TGT_CODE2] << 16) | (unsigned long)(irCodes[i][IRCODES_TGT_CODE3] << 24);
+        unsigned long srcCodeValue = ((unsigned long)irCodes[i][IRCODES_SRC_CODE0]) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE1] << 8) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE2] << 16) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE3] << 24);
+        unsigned long tgtCodeValue = ((unsigned long)irCodes[i][IRCODES_TGT_CODE0]) | ((unsigned long)irCodes[i][IRCODES_TGT_CODE1] << 8) | ((unsigned long)irCodes[i][IRCODES_TGT_CODE2] << 16) | ((unsigned long)irCodes[i][IRCODES_TGT_CODE3] << 24);
         Serial.print(F("IR Codes ["));
         Serial.print(i + 1, DEC);
         Serial.print(F("]: "));
