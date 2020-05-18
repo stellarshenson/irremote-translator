@@ -38,7 +38,7 @@
 #define DEBUG_LEVEL 2 //0 - debug off, 1 - essential messages, 2 - full diagnostics
 
 //saved ir codes - we only need the code from SRC, not length or type
-#define IRCODES_NUMBER       32 //number of codes stored in memory
+#define IRCODES_NUMBER       16 //number of codes stored in memory
 #define IRCODES_SRC_CODE0    0
 #define IRCODES_SRC_CODE1    1
 #define IRCODES_SRC_CODE2    2
@@ -57,7 +57,7 @@ IRsend irsend;
 decode_results results;
 
 // Storage for the recorded code
-void sendCode(uint8_t repeat, uint8_t codeType, uint8_t codeLen, unsigned long codeValue);
+void tgtCode(uint8_t repeat, uint8_t codeType, uint8_t codeLen, unsigned long codeValue);
 void storeCode(decode_results *results, int8_t &codeType, uint8_t &codeLen, unsigned long &codeValue);
 
 static uint8_t irCodes[IRCODES_NUMBER][10] = {0}; //static initialisation to 0 of all elements
@@ -66,6 +66,11 @@ uint8_t codeType = 255; // The type of code, 255 is unsigned equivalent of -1
 uint8_t codeLen = 0; // The length of the code
 unsigned long codeValue = 0; // The code value if not raw
 int codeIndex = -1; //index of the code in the translation table, used for recording
+
+//codes sent after translation
+uint8_t tgtCodeType = 255; 
+uint8_t tgtCodeLen = 0;
+unsigned long tgtCodeValue = 0;
 
 uint8_t toggle = 0; // The RC5/6 toggle state
 uint16_t rawCodes[RAWBUF]; // The durations if raw
@@ -113,7 +118,7 @@ void setup() {
     uint8_t initStatus = EEPROM.read(0); //if initStatus=1 initialised, initStatus=0 uninitialised
 
     //system not initialised, writing zeros to eeprom
-    if (initStatus == 255) {
+    if (initStatus == 255 || initStatus == 0) {
         Serial.println(F("[INIT] System first run, bootstrapping initial codes in EEPROM"));
         saveIRCodesToEEPROM();
         EEPROM.update(0, 1); //bootstrap flag
@@ -208,32 +213,34 @@ void on_ircode_sense_loop() {
         //read the code and find the translation code
         codeType, codeLen, codeValue = 0;
         storeCode(&results, codeType, codeLen, codeValue);
+        
         Serial.print(F("[IRCODE SENSE] IR Signal detected with value: "));
-        if (results.value == REPEAT) Serial.println(F("NEC REPEAT"));
+        if (results.value == REPEAT) { Serial.print(F("NEC REPEAT (repeating code:  ")); Serial.print(tgtCodeValue, HEX); Serial.println(F(")")); }
         else Serial.println(codeValue, HEX);
 
-        //if repeat, ignore translation, just send repeat
+        //if repeat, ignore translation, send the last code and follow with repeat afterwards
         if (results.value == REPEAT) {
-        	Serial.println(F("[IRCODE SENSE] Sending NEC REPEAT IR Code"));
-            sendCode(1, codeType, codeLen, codeValue); //send NEC repeat
+        	Serial.print(F("[IRCODE SENSE] REPEATING IR code: "));
+        	Serial.println(tgtCodeValue, HEX);
+            sendCode(0, tgtCodeType, tgtCodeLen, tgtCodeValue); //send NEC repeat
         } 
         //if no repeat, use translation table to send the right code
         else {
             _foundIRCodeIndex = findIRCodeIndex(codeValue);
             if (_foundIRCodeIndex != -1) {
-                codeValue = ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE0]) |
+                tgtCodeValue = ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE0]) |
                             ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE1] << 8) |
                             ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE2] << 16) |
                             ((unsigned long)irCodes[_foundIRCodeIndex][IRCODES_TGT_CODE3] << 24);
-                codeType = irCodes[_foundIRCodeIndex][IRCODES_TGT_CODETYPE];
-                codeLen = irCodes[_foundIRCodeIndex][IRCODES_TGT_CODELEN];
+                tgtCodeType = irCodes[_foundIRCodeIndex][IRCODES_TGT_CODETYPE];
+                tgtCodeLen = irCodes[_foundIRCodeIndex][IRCODES_TGT_CODELEN];
                 Serial.print(F("[IRCODE SENSE] IR code translation found with index: "));
                 Serial.println(_foundIRCodeIndex, DEC);
                 Serial.print(F("[IRCODE SENSE] sending translated IR code: "));
-                Serial.println(codeValue, HEX);
+                Serial.println(tgtCodeValue, HEX);
 
                 //send code and resume operation
-                sendCode(0, codeType, codeLen, codeValue); //send recorded or saved IR code without repeat
+                sendCode(0, tgtCodeType, tgtCodeLen, tgtCodeValue); //send recorded or saved IR code without repeat
             } else {
                 Serial.println(F("[IRCODE SENSE][ERROR] IR code translation not found"));
                 blink(LED_STATUS_PIN, 3, 250);
@@ -362,7 +369,18 @@ void on_ircode_record_loop() {
         irCodes[codeIndex][IRCODES_TGT_CODETYPE] = codeType;
 
         //save results to EEPROM and show codes
+        unsigned long timeStamp = millis();
+        Serial.print(F("[IRCODE RECORD] Saving ircodes back to EEPROM..."));
         saveIRCodesToEEPROM();
+        Serial.print(F(" done, took "));
+        Serial.print(millis() - timeStamp, DEC);
+        Serial.println(" milliseconds");
+        Serial.print(F("[IRCODE RECORD] Readong ircodes back from EEPROM..."));
+        timeStamp = millis();
+        getIRCodesFromEEPROM();
+        Serial.print(F(" done, took "));
+        Serial.print(millis() - timeStamp, DEC);
+        Serial.println(" milliseconds");
         printIRCodesSerial();
 
         //blink and turn STORED LED on
@@ -594,7 +612,7 @@ int findFreeIRCodeIndex() {
     //find first code with value 0
     for (int i = 0; i < IRCODES_NUMBER; i++) {
         unsigned long srcCodeValue = ((unsigned long)irCodes[i][IRCODES_SRC_CODE0]) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE1] << 8) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE2] << 16) | ((unsigned long)irCodes[i][IRCODES_SRC_CODE3] << 24);
-        if ( srcCodeValue == 0 ) {
+        if ( srcCodeValue == 0 || srcCodeValue == 0xff ) {
             _index = i;
             break;
         }
