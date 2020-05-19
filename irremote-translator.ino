@@ -313,7 +313,7 @@ void on_ircode_record_loop() {
 
 
     //read and decode the src code
-    if (irrecv.decode(&results) && g_irCodeRecordingStatus == 0) {
+    if (irrecv.decode(&results) && results.value != REPEAT && g_irCodeRecordingStatus == 0) {
         storeCode(&results, g_rcvCodeType, g_rcvCodeLen, g_rcvCodeValue);
         if (DEBUG_LEVEL) { Serial.print(F("[IRCODE RECORD][1/2] - SRC ircode captured with value: ")); Serial.println(g_rcvCodeValue, HEX); }
         g_irCodeRecordingStatus++;
@@ -355,7 +355,7 @@ void on_ircode_record_loop() {
     }
 
     //read and decode the tgt code. slot must have been activated by now
-    if (irrecv.decode(&results) && g_irCodeRecordingStatus == 1) {
+    if (irrecv.decode(&results) && results.value != REPEAT && g_irCodeRecordingStatus == 1) {
         storeCode(&results, g_rcvCodeType, g_rcvCodeLen, g_rcvCodeValue);
         if (DEBUG_LEVEL) { Serial.print(F("[IRCODE RECORD][2/2] - TGT ircode captured with value: ")); Serial.println(g_rcvCodeValue, HEX); }
         g_irCodeRecordingStatus++;
