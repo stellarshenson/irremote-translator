@@ -67,5 +67,10 @@ Listens for three types of events:
 
 ## Circuit and PCB ##
 ![breadboard](https://github.com/stellarshenson/irremote-translator/blob/master/irremote-translator_bb.jpg)
-![schematics](https://github.com/stellarshenson/irremote-translator/blob/master/irremote-translator_sch.png)
+![schematics](https://github.com/stellarshenson/irremote-translator/blob/master/irremote-translator_sch.jpg)
+![pcb all](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/irremote-translator_pcb_all)
+![pcb top](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/irremote-translator_pcb_top_400dpi.jpg)
+![pcb btm](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/irremote-translator_pcb_btm_400dpi.jpg)
 ![assembled breadboard](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/images/IMG_6503.jpg)
+
+
