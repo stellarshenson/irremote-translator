@@ -72,7 +72,7 @@ uint8_t g_tgtCodeType = 255;
 uint8_t g_tgtCodeLen = 0;
 unsigned long g_tgtCodeValue = 0;
 
-uint16_t g_rawCodes[RAWBUF]; // The durations if raw
+uint16_t g_rawCodes[RAW_BUFFER_LENGTH]; // The durations if raw
 uint8_t g_irCodesAvailable = 0; //how many g_irCodes were recorded and saved, initiated during setup
 uint8_t g_irCodeRecordingStatus = 0; //code recording status used during recording session. 0 - not recorded, 1 - src recorded, 2 - tgt recorded
 
@@ -431,12 +431,12 @@ void storeCode(decode_results *results, uint8_t &codeType, uint8_t &codeLen, uns
         for (int i = 1; i <= codeLen; i++) {
             if (i % 2) {
                 // Mark
-                g_rawCodes[i - 1] = results->rawbuf[i] * USECPERTICK - MARK_EXCESS;
+                g_rawCodes[i - 1] = results->rawbuf[i] * MICROS_PER_TICK - MARK_EXCESS_MICROS;
                 if (DEBUG_LEVEL == 2) Serial.print(" m");
             }
             else {
                 // Space
-                g_rawCodes[i - 1] = results->rawbuf[i] * USECPERTICK + MARK_EXCESS;
+                g_rawCodes[i - 1] = results->rawbuf[i] * MICROS_PER_TICK - MARK_EXCESS_MICROS;
                 if (DEBUG_LEVEL == 2) Serial.print(" s");
             }
             if (DEBUG_LEVEL == 2) Serial.print(g_rawCodes[i - 1], DEC);
