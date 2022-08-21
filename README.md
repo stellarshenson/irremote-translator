@@ -66,11 +66,10 @@ Listens for three types of events:
 1. IR Code, when detected the device looks for the previously recorded slot (to overwrite) or for a new slot (if not recorded the code yet). Device records the source IR code and listens for another IR code and maps it to the previous one and returns to the previous state
 
 ## Circuit and PCB ##
-![breadboard](https://github.com/stellarshenson/irremote-translator/blob/master/irremote-translator_bb.jpg)
-![schematics](https://github.com/stellarshenson/irremote-translator/blob/master/irremote-translator_sch.jpg)
-![pcb all](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/irremote-translator_pcb_all.jpg)
-![pcb top](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/irremote-translator_pcb_top_400dpi.jpg)
-![pcb btm](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/irremote-translator_pcb_btm_400dpi.jpg)
-![assembled breadboard](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/images/IMG_6503.jpg)
+![schematics](https://github.com/stellarshenson/irremote-translator/blob/master/misc/irremote-translator_schematics.png)
+![pcb top](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_pcb_top_600dpi.jpg)
+![pcb btm](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_pcb_btm_600dpi.jpg)
+![assembled breadboard](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/IMG_6503.jpg)
+![3d image](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_3d.jpg)
 
 
