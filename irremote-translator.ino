@@ -185,7 +185,6 @@ void setup() {
 
   //set up button listeners
   cfgButton.begin();
-
 }
 
 /********************************************************************************************************************
@@ -194,18 +193,19 @@ void setup() {
     | |__/ _ \/ _ \ '_ \
     |____\___/\___/ .__/
                   |_|
-  /*********************************************************************************************************************/
+*********************************************************************************************************************/
 void loop() {
   fsm.run_machine(); //run state loops
   led_active.Update(); //run led driver
 }
 
-/*  ====================================================================================================================
+/********************************************************************************************************************
      ___ _        _         __  __         _    _
     / __| |_ __ _| |_ ___  |  \/  |__ _ __| |_ (_)_ _  ___
     \__ \  _/ _` |  _/ -_) | |\/| / _` / _| ' \| | ' \/ -_)
     |___/\__\__,_|\__\___| |_|  |_\__,_\__|_||_|_|_||_\___|
-    ====================================================================================================================*/
+
+*********************************************************************************************************************/
 // STATE_IRCODE_SENSE
 
 /**
@@ -228,21 +228,21 @@ void on_ircode_sense_enter() {
 */
 void on_ircode_sense_loop() {
   int _foundIRCodeIndex = -1;
-   cfgButton.read();  // read the button
+  cfgButton.read();  // read the button
 
   // button held for longpress to perform reset
   if (cfgButton.pressedFor(BTN_LONGPRESS_DURATION)) {
     if (DEBUG_LEVEL) Serial.println(F("[IRCODE SENSE] reset detected"));
-    resetIRCodes();    
+    resetIRCodes();
     //go back to unconfigured blinking
     led_active = led_noconfig;
   } else
-  // click button to enable recording ircode
-  if (cfgButton.wasReleased()) {
-    delay(250); //avoid bounce
-    if (DEBUG_LEVEL) Serial.println(F("[IRCODE SENSE] IRCode recording detected"));
-    fsm.trigger(TRIGGER_IRCODE_RECORD);
-  }
+    // click button to enable recording ircode
+    if (cfgButton.wasReleased()) {
+      delay(250); //avoid bounce
+      if (DEBUG_LEVEL) Serial.println(F("[IRCODE SENSE] IRCode recording detected"));
+      fsm.trigger(TRIGGER_IRCODE_RECORD);
+    }
 
   //check the IR code and send response code
   if ( irrecv.decode(&results) ) {
