@@ -70,6 +70,6 @@ Listens for three types of events:
 ![pcb top](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_pcb_top_600dpi.jpg)
 ![pcb btm](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_pcb_btm_600dpi.jpg)
 ![assembled breadboard](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/IMG_6503.jpg)
-![3d image](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_3d.jpg)
+![3d image](https://raw.githubusercontent.com/stellarshenson/irremote-translator/master/misc/irremote-translator_3d.png)
 
 
